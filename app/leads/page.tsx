@@ -1,8 +1,15 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { StageSelect } from "./StageSelect";
 
-export default async function LeadsPage() {
+export const dynamic = "force-dynamic";
+
+export default async function LeadsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ search?: string; stage?: string; industry?: string }>;
+}) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -12,52 +19,154 @@ export default async function LeadsPage() {
     redirect("/login");
   }
 
-  const { data: leads } = await supabase
+  const params = await searchParams;
+  const search = (params.search || "").toLowerCase();
+  const stageFilter = params.stage || "";
+  const industryFilter = params.industry || "";
+
+  const { data: allLeads } = await supabase
     .from("zoftware_leads")
-    .select("*, zoftware_companies(name, industry, city), zoftware_contacts(name, role, phone)")
+    .select(
+      "*, zoftware_companies(name, industry, city, website), zoftware_contacts(name, role, phone)"
+    )
     .neq("stage", "disqualified")
     .order("updated_at", { ascending: false });
 
-  const stageColors = {
-    prospect: "bg-gray-100 text-gray-800",
-    contacted: "bg-blue-100 text-blue-800",
-    replied: "bg-green-100 text-green-800",
-    meeting: "bg-purple-100 text-purple-800",
-    client: "bg-emerald-100 text-emerald-800",
-    disqualified: "bg-red-100 text-red-800",
-    unreachable: "bg-orange-100 text-orange-800",
-  };
+  const leads = (allLeads || []).filter((lead: any) => {
+    if (stageFilter && lead.stage !== stageFilter) return false;
+    if (
+      industryFilter &&
+      lead.zoftware_companies?.industry?.toLowerCase() !==
+        industryFilter.toLowerCase()
+    )
+      return false;
+    if (search) {
+      const company = (lead.zoftware_companies?.name || "").toLowerCase();
+      const contact = (lead.zoftware_contacts?.name || "").toLowerCase();
+      const industry = (lead.zoftware_companies?.industry || "").toLowerCase();
+      const city = (lead.zoftware_companies?.city || "").toLowerCase();
+      if (
+        !company.includes(search) &&
+        !contact.includes(search) &&
+        !industry.includes(search) &&
+        !city.includes(search)
+      )
+        return false;
+    }
+    return true;
+  });
 
   const now = new Date();
-  const followUpLeads = (leads || []).filter(
-    (l: any) =>
-      l.next_follow_up_at &&
-      new Date(l.next_follow_up_at) <= now &&
-      l.stage !== "client" &&
-      l.stage !== "disqualified" &&
-      l.stage !== "unreachable"
-  );
+  const freshLeads = leads.filter((l: any) => {
+    if (!l.next_follow_up_at) return true;
+    return new Date(l.next_follow_up_at) > now;
+  });
+
+  const allIndustries = [
+    ...new Set(
+      (allLeads || [])
+        .map((l: any) => l.zoftware_companies?.industry)
+        .filter(Boolean)
+    ),
+  ].sort();
+
+  const allStages = [...new Set((allLeads || []).map((l: any) => l.stage))].sort();
+
+  function formatDate(iso: string | null) {
+    if (!iso) return "—";
+    try {
+      const d = new Date(iso);
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yyyy = d.getFullYear();
+      return `${dd}/${mm}/${yyyy}`;
+    } catch {
+      return "—";
+    }
+  }
 
   return (
     <div className="max-w-7xl mx-auto p-8">
-      <div className="mb-8 flex justify-between items-center">
+      <div className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Leads</h1>
           <p className="text-gray-600 mt-1">
-            {leads?.length || 0} leads in your pipeline
+            {freshLeads.length} fresh leads in your pipeline
           </p>
         </div>
-        <Link
-          href="/"
-          className="text-blue-600 hover:text-blue-800 font-medium"
-        >
-          ← Back to Dashboard
-        </Link>
+        <div className="flex gap-3 flex-wrap">
+          <Link
+            href="/follow-ups"
+            className="px-4 py-2 bg-amber-100 text-amber-900 rounded hover:bg-amber-200 text-sm font-medium border border-amber-200"
+          >
+            ⚠ Follow-ups
+          </Link>
+          <Link href="/" className="text-blue-600 hover:text-blue-800 font-medium">
+            ← Dashboard
+          </Link>
+        </div>
       </div>
 
-      {(!leads || leads.length === 0) ? (
+      <form method="get" className="bg-white rounded-lg shadow p-4 mb-6 grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Search</label>
+          <input
+            type="text"
+            name="search"
+            defaultValue={params.search || ""}
+            placeholder="Company, contact, city…"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Stage</label>
+          <select
+            name="stage"
+            defaultValue={stageFilter}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+          >
+            <option value="">All stages</option>
+            {allStages.map((s) => (
+              <option key={s} value={s}>
+                {s === "meeting" ? "met" : s}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Industry</label>
+          <select
+            name="industry"
+            defaultValue={industryFilter}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+          >
+            <option value="">All industries</option>
+            {allIndustries.map((ind) => (
+              <option key={ind as string} value={ind as string}>
+                {ind as string}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-end gap-2">
+          <button
+            type="submit"
+            className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700"
+          >
+            Filter
+          </button>
+          <Link
+            href="/leads"
+            className="px-4 py-2 bg-gray-100 text-gray-700 rounded text-sm font-medium hover:bg-gray-200"
+          >
+            Clear
+          </Link>
+        </div>
+      </form>
+
+      {!freshLeads || freshLeads.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center">
-          <p className="text-gray-600 mb-4">No leads yet</p>
+          <p className="text-gray-600 mb-4">No fresh leads match your filters</p>
           <Link
             href="/companies-to-approve"
             className="text-blue-600 hover:text-blue-800 font-medium"
@@ -66,131 +175,90 @@ export default async function LeadsPage() {
           </Link>
         </div>
       ) : (
-        <>
-          {followUpLeads.length > 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 mb-6">
-              <h2 className="text-lg font-semibold text-amber-900 mb-3">
-                ⚠️ Follow-ups needed
-              </h2>
-              <p className="text-amber-800 text-sm mb-4">
-                The following leads are due for a follow-up:
-              </p>
-              <div className="space-y-3">
-                {followUpLeads.map((lead: any) => (
-                    <div
-                      key={lead.id}
-                      className="flex items-center justify-between p-3 bg-white rounded border border-amber-100"
-                    >
-                      <div>
-                        <div className="text-sm font-medium text-gray-900">
-                          {lead.zoftware_companies?.name}
-                        </div>
-                        <div className="text-xs text-gray-600">
-                          Due:{new Date(
-                            lead.next_follow_up_at
-                          ).toLocaleDateString()}
-                        </div>
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Company
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Contact
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Industry
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Website
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Stage
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Last contact
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {freshLeads.map((lead: any) => (
+                  <tr key={lead.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">
+                        {lead.zoftware_companies?.name}
                       </div>
+                      <div className="text-sm text-gray-500">
+                        {lead.zoftware_companies?.city}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">
+                        {lead.zoftware_contacts?.name || "—"}
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        {lead.zoftware_contacts?.role || "—"}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {lead.zoftware_companies?.industry || "—"}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {lead.zoftware_companies?.website ? (
+                        <a
+                          href={lead.zoftware_companies.website}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline"
+                        >
+                          {lead.zoftware_companies.website}
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <StageSelect leadId={lead.id} currentStage={lead.stage} />
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {formatDate(lead.last_contacted_at)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <Link
                         href={`/leads/${lead.id}`}
-                        className="text-xs text-amber-600 hover:underline font-medium"
+                        className="text-blue-600 hover:text-blue-900"
                       >
-                        View lead
+                        View
                       </Link>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          )})
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Company
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Contact
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Industry
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Website
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Stage
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Last Contacted
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {leads.map((lead: any) => (
-                <tr key={lead.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900">
-                      {lead.zoftware_companies?.name}
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      {lead.zoftware_companies?.city}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">
-                      {lead.zoftware_contacts?.name || "—"}
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      {lead.zoftware_contacts?.role || "—"}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {lead.zoftware_companies?.industry || "—"}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {lead.zoftware_companies?.website ? (
-                      <a
-                        href={lead.zoftware_companies.website}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline"
-                      >
-                        {lead.zoftware_companies.website}
-                      </a>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span
-                      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        stageColors[lead.stage as keyof typeof stageColors]
-                      }`}
-                    >
-                      {lead.stage}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {lead.last_contacted_at
-                      ? new Date(lead.last_contacted_at).toLocaleDateString()
-                      : "—"}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <Link
-                      href={`/leads/${lead.id}`}
-                      className="text-blue-600 hover:text-blue-900"
-                    >
-                      View
-                    </Link>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -67,6 +67,24 @@ export default async function Dashboard() {
     .in("type", ["whatsapp_reply", "email_reply"])
     .gte("replied_at", startOfToday.toISOString());
 
+  // Follow-ups marked done (Mark followed up → notes = follow_up_confirmed)
+  const { count: followUpsToday } = await supabase
+    .from("zoftware_interactions")
+    .select("*", { count: "exact", head: true })
+    .eq("notes", "follow_up_confirmed")
+    .gte("sent_at", startOfToday.toISOString());
+
+  const { count: followUpsThisWeek } = await supabase
+    .from("zoftware_interactions")
+    .select("*", { count: "exact", head: true })
+    .eq("notes", "follow_up_confirmed")
+    .gte("sent_at", startOfWeek.toISOString());
+
+  const { count: followUpsTotal } = await supabase
+    .from("zoftware_interactions")
+    .select("*", { count: "exact", head: true })
+    .eq("notes", "follow_up_confirmed");
+
   // Fetch follow-ups due today
   const today = new Date().toISOString().split("T")[0];
   const { data: followUps } = await supabase
@@ -117,16 +135,42 @@ export default async function Dashboard() {
           <div className="text-sm text-gray-600 mb-1">Replies Today</div>
           <div className="text-3xl font-bold text-emerald-600">{repliesToday || 0}</div>
         </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="text-sm text-gray-600 mb-1">Follow-ups Sent Today</div>
+          <div className="text-3xl font-bold text-amber-600">{followUpsToday || 0}</div>
+        </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="text-sm text-gray-600 mb-1">Follow-ups Sent This Week</div>
+          <div className="text-3xl font-bold text-orange-600">{followUpsThisWeek || 0}</div>
+        </div>
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="text-sm text-gray-600 mb-1">Total Follow-ups Sent</div>
+          <div className="text-3xl font-bold text-rose-600">{followUpsTotal || 0}</div>
+        </div>
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <Link
           href="/leads"
           className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
         >
           <h3 className="font-semibold text-gray-900 mb-2">View All Leads</h3>
           <p className="text-sm text-gray-600">Manage your outreach pipeline</p>
+        </Link>
+        <Link
+          href="/follow-ups"
+          className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow border border-amber-100"
+        >
+          <h3 className="font-semibold text-gray-900 mb-2">Follow-ups</h3>
+          <p className="text-sm text-gray-600">Due follow-ups and mark as sent</p>
+        </Link>
+        <Link
+          href="/activity"
+          className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow border border-blue-100"
+        >
+          <h3 className="font-semibold text-gray-900 mb-2">Outreach calendar</h3>
+          <p className="text-sm text-gray-600">Daily sends and companies contacted</p>
         </Link>
         <Link
           href="/companies-to-approve"
